@@ -1,0 +1,19 @@
+/* New Prescribers from sample distribution */
+
+data OUTPUT.step1;
+	set OUTPUT.SAMPLES_NOVID_SORT;
+	where SHIP_DATE between &start_date and &end_date;
+run;
+
+proc sql;
+	create table step2 as 
+	select novid, MD_First_Name, MD_Last_Name, count(SHIP_DATE) as num_shipment
+	from OUTPUT.step1
+	group by novid, MD_First_Name, MD_Last_Name;
+quit;
+
+data OUTPUT.step3;
+	set OUTPUT.step2;
+	if num_shipment>0 then
+	new_sample_prescriber=1;
+run;
