@@ -5,7 +5,7 @@
 
 data OUTPUT.step1;
 	set OUTPUT.SAMPLES_NOVID_SORT;
-	where SHIP_DATE between &start_date and &end_date;
+	where SHIP_DATE between "&start_date"d and "&end_date"d;
 run;
 
 proc sql;
