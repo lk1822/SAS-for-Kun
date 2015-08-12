@@ -1,0 +1,562 @@
+OPTION COMPRESS = YES;
+
+/*-----------------------------------------------------------------------------------------------------
+									ASSIGNMENT OF MACRO VARIABLES
+------------------------------------------------------------------------------------------------------*/
+
+/*NUMBER OF TOTAL MONTHS IN THE CONTEST*/
+%LET TOT_MON_CONT		= 	5;		
+
+/*CURRENT MONTH OF THE CONTEST*/
+%LET MON				= 	5;																/*ACCORDING TO THE DATA DATE*/	                                        
+
+%LET YYYYMMDD			=	y2015m07d24;													/*CHANGES: BIWEEKLY DATA DATE*/
+
+%LET CYCLE = Y2015C3;																		/*CHANGES: FOR EVERY TRIMESTER*/
+
+
+
+
+/*-----------------------------------------------------------------------------------------------------
+							 		ASSIGNMENT OF LIBRARIES
+------------------------------------------------------------------------------------------------------*/
+
+
+
+					
+LIBNAME REF 		"H:\Farydak contest\NOV sasdata\reference\&CYCLE." 									ACCESS = READONLY;						
+LIBNAME INP		 	"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\advanced_monthly\prescriber_product" 		ACCESS = READONLY;				
+LIBNAME BLK 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\transactions"								ACCESS = READONLY;											/*INPUT LIBRARIES*/
+LIBNAME ROST 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\roster" 									ACCESS = READONLY;			
+/*LIBNAME DEA 		"G:\Guglisa1\NOV sasdata\reference" 											ACCESS = READONLY;*/
+LIBNAME BIO 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\special"									ACCESS = READONLY;	
+
+
+						
+LIBNAME OUTPUT 		"H:\Farydak contest\OutData\&yyyymmdd.\Output";																					/*OUTPUT LIBRARIES*/
+LIBNAME FINAL 		"H:\Farydak contest\OutData\SASDATA\&YYYYMMDD.\Final";
+
+
+
+
+
+/*-----------------------------------------------------------------------------------------------------------------------------------------------
+								ADD A QC CHECK TO CONFIRM THERE IS NO HISTORY PRIOR TO MAR 2015
+-----------------------------------------------------------------------------------------------------------------------------------------------*/
+
+
+PROC SUMMARY DATA=INP.MMY;                                                         		/*SUMMARIZE RX TO CHECK FOR DATA PRIOR TO MARCH*/
+  VAR TRX%EVAL(&MON. + 1 ) - TRX27;
+  OUTPUT OUT=OUTPUT.CHECK_PREV(DROP=_:) SUM=;											/*TRX FROM NEXT FEED CHANGES ACCORDINGLY*/
+  WHERE PRODFAM = "FDK";
+RUN;
+
+DATA QC;																				/*SUM THE VALUES IN ALL THE BUCKETS*/
+	SET OUTPUT.CHECK_PREV;
+	TOTAL = SUM(OF TRX%EVAL(&MON. + 1 ) - TRX27);
+RUN;
+
+PROC PRINT DATA = QC; VAR TOTAL;RUN;													/*PRINT THE SUM AND CHECK IF IT IS EQUAL TO 0*/
+
+
+
+
+/*--------------------------------------------------------------------------------------------------------------------------
+									IDENTIFY THE GEOGRAPHIES FOR FARYDAK CONTEST
+---------------------------------------------------------------------------------------------------------------------------*/
+
+
+DATA OUTPUT.FARYDAK_HIERARCHY(INDEX = (TERR / UNIQUE));												/* CREATE AN INDEX WITH UNIQUE TERR*/
+SET REF.ONCOLOGY_HIERARCHY;
+WHERE AKEY = 'FDK' AND TERR_TYPE NOT IN('EXCL','WHTSP') AND GHOST EQ '';
+RUN;
+
+
+DATA OUTPUT.MASTER_HIERARCHY_MERGE_FDK (KEEP = TERR FF AKEY AREA ASM NOVID SPEC SPEC_GRP ZIP
+STATE REGION PDRP GHOST FNAME MNAME LNAME IC_FDK ADDR1 ADDR2 TR);																	
+SET REF.MASTER_PROFILE_TERR_I;
+WHERE IC_FDK = 'Y'; 																				/*IDENTIFY THE RECORDS OF PHYSICIANS WITH INCLUDED SPECIALTIES */
+	_ERROR_ = 0; 
+SET OUTPUT.FARYDAK_HIERARCHY KEY = TERR / UNIQUE; 
+IF _IORC_ EQ 0;																						/*INDEX MERGE THE DATASETS BASED ON TERR TO GET THE HIERARCHY*/
+RUN;
+
+
+
+/*--------------------------------------------------------------------------------------------------------------------------------------------------
+										QC CHECK THE MERGED DATA FOR UNIQUENESS
+--------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+PROC SORT DATA = OUTPUT.MASTER_HIERARCHY_MERGE_FDK OUT = MST_UNQ DUPOUT = MST_DUP NODUPKEY;
+BY TERR NOVID;																								/* MERGED DATA IS UNIQUE AT TERR-NOVID LEVEL */
+RUN;																			 
+
+
+
+
+
+/*-----------------------------------------------------------------------------------------------------
+							SUMMARIZING THE SAMPLES DATA
+------------------------------------------------------------------------------------------------------*/
+
+
+/*CHECK THE LATEST SAMPLES DATE*/
+ 
+PROC SQL;
+SELECT MAX(SHIP_DATE)AS LAT_DATE FORMAT = DATE9.  FROM BIO.FDK_21_DAY_TRIAL ;
+quit;
+
+
+PROC SQL;
+SELECT MIN(SHIP_DATE)AS LAT_DATE FORMAT = DATE9.  FROM BIO.FDK_21_DAY_TRIAL ;
+quit;
+
+
+/*CHECK FOR ANY DUPLICATE RECORDS*/
+
+PROC SORT DATA = BIO.FDK_21_DAY_TRIAL OUT = TEST NODUPKEY;
+BY _ALL_;
+RUN;
+
+
+PROC SORT DATA = BIO.FDK_21_DAY_TRIAL OUT = OUTPUT.SAMPLES_NOVID_SORT;
+BY NOVID;
+RUN;
+
+
+
+/*INCLUDING THE SAMPLE DATA */
+
+DATA OUTPUT.SAMPLE_DATA (KEEP = SHIP_DATE NOVID MD_NPI SHIP_DATE SAMP_4 SAMP_5 SAMP_6 SAMP_7 
+MON MD_FIRST_NAME MD_LAST_NAME);
+SET OUTPUT.SAMPLES_NOVID_SORT;						 															/* WE MERGE THIS DATA WITH THE NEW DATA FEED RECEIVE EVERY WEEK*/
+ARRAY SAMP(4) SAMP_4 - SAMP_7;																 		
+DO I = 1 TO DIM(SAMP);
+SAMP(I) =0;
+END;
+MON = MONTH(SHIP_DATE);
+YR = YEAR(SHIP_DATE);
+MD_FIRST_NAME = UPCASE(MD_FIRST_NAME);
+MD_LAST_NAME = UPCASE(MD_LAST_NAME);
+IF YR = "2015" THEN DO;
+IF MON IN ('03','04') THEN SAMP_4 = 1;
+IF MON = '05' THEN SAMP_5 = 1;
+IF MON = '06' THEN SAMP_6 = 1;
+IF MON = '07' THEN SAMP_7 = 1;
+END;
+RUN;
+
+
+
+/*SORT THE DATA TO ENABLE SUMMARIZING AT THE MD_NPI LEVEL TO GET UNIQUE VALUES FOR IT*/
+
+PROC SORT DATA = OUTPUT.SAMPLE_DATA;														
+BY NOVID MD_FIRST_NAME MD_LAST_NAME;
+RUN;
+
+
+/*SUMMARIZE DATA TO GET UNIQUE MD_NPI TO MAKE NOVID UNIQUE*/
+
+PROC SUMMARY DATA=OUTPUT.SAMPLE_DATA;                                                          
+  BY NOVID MD_FIRST_NAME MD_LAST_NAME;
+  VAR SAMP_4 - SAMP_7;
+  WHERE NOVID NE "";
+  OUTPUT OUT=OUTPUT.SAMPLE_NOVID_UNIQ(DROP=_: INDEX =(NOVID/UNIQUE)) SUM=;
+RUN;
+
+
+/*FINDING OUT THE NEW UNIQUE SAMPLE PRESCRIBERS*/
+
+DATA OUTPUT.SAMPLES_FINAL(INDEX = (NOVID/UNIQUE));	
+SET OUTPUT.SAMPLE_NOVID_UNIQ;
+	TOTAL = SUM(OF SAMP_4 - SAMP_7);
+	IF TOTAL > 0 THEN NEW_SAMP_PRESCRIBER = 1; ELSE NEW_SAMP_PRESCRIBER = 0;
+RUN;
+
+
+/*------------------------------------------------------------------------------------------------
+									SUMMARIZING RX DATA
+-------------------------------------------------------------------------------------------------*/
+
+
+
+/* ADVANCE MONTHLY BUCKETS FOR THE XPON DATA FOR FARYDAK*/
+
+%MACRO INIT;																							/*INITIALIZE ALL THE BUCKETS TO MISSING INITIALLY*/
+	%DO I = 1 %TO &TOT_MON_CONT.;
+		MON_&I. = .;
+	%END;
+%MEND INIT;
+
+%MACRO ASSGN;																							/*CODE TO HANDLE THE ADVANCE MONTHLY SCENARIO */
+%IF &MON. <= &TOT_MON_CONT. %THEN %DO;
+	%LET J = 1 ;
+	%DO I = &MON. %TO 1 %BY -1;    
+		MON_&J.= TRX&I.;
+		%LET J = %EVAL(&J+1);
+	%END;
+%END;
+%MEND ASSGN;
+
+DATA OUTPUT.MMY_TRANSPOSE(KEEP=NOVID PRODFAM MON_1-MON_5);												/*EXECUTING THE CODE*/
+SET INP.MMY;	
+	%INIT;
+	%ASSGN;
+RUN;
+
+
+
+PROC SUMMARY DATA=OUTPUT.MMY_TRANSPOSE;                                                          	 
+  BY NOVID;																											/*SUMMARIZE TOTAL RX TO MAKE NOVID UNIQUE*/
+  VAR MON_1-MON_5;
+  OUTPUT OUT=OUTPUT.MMY_TRANSPOSE_NOVID_UNIQ(DROP=_:) SUM=;
+  WHERE PRODFAM = "FDK";
+RUN;
+
+
+
+/*FINDING OUT THE UNIQUE NEW RX PRESCRIBERS*/
+
+DATA OUTPUT.RX_REQ_DATA(INDEX = (NOVID/UNIQUE));	
+SET OUTPUT.MMY_TRANSPOSE_NOVID_UNIQ;
+	TOTAL = SUM(OF MON_1-MON_5);
+	IF TOTAL > 0 THEN NEW_RX_PRESCRIBER = 1; ELSE NEW_RX_PRESCRIBER = 0;
+RUN;
+
+
+
+
+
+
+/*---------------------------------------------------------------------------------------------------------------------------------------------------
+														CONSIDERING BULK PURCHASES
+---------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+
+/*CHECK FOR BULK PURCHASE TRANSACTIONS*/
+
+PROC FREQ DATA = BLK.FDK;						
+TABLES TRANSTYPE / LIST MISSING;
+RUN;
+
+/*CHECK THE LATEST DATE*/
+
+PROC SQL;
+SELECT MAX(SHIP_DATE) AS MAXDATE FORMAT DATE9. FROM BLK.FDK WHERE TRANSTYPE = "BULK";
+RUN;
+
+
+/*---------------------------------------------------------------------------------------------------------------------------
+		QC CHECK TO SEE IF EACH SHIP NAME IS ASSOCIATED WITH ONLY 1 SHIP_DEA AND SHIP_TO_BPID
+---------------------------------------------------------------------------------------------------------------------------*/
+
+DATA OUTPUT.BLK_PURCH (KEEP = TRANSTYPE TRX SHIPNAME -- SHIP_DEA SHIP_TO_BPID) ;
+SET BLK.FDK;
+WHERE TRANSTYPE = "BULK";
+RUN;
+
+
+
+/*CONVERTING SHIP_TO_BPID TO NUMERIC*/
+
+DATA OUTPUT.BLK_PURCH_BPID_NBR (DROP = TEMP);
+SET OUTPUT.BLK_PURCH (RENAME = (SHIP_TO_BPID = TEMP));
+SHIP_TO_BPID = INPUT(TEMP,10.);
+RUN;
+
+
+PROC SORT DATA = OUTPUT.BLK_PURCH_BPID_NBR OUT = OUTPUT.BLK_TEST (INDEX = (SHIPNAME/UNIQUE)) DUPOUT = OUTPUT.BLK_TEST2(RENAME = (SHIP_TO_BPID = SHIP_TO_BPID1)) NODUPKEY;
+BY SHIPNAME;
+RUN;
+
+
+DATA TEST;					
+SET OUTPUT.BLK_TEST2;
+_ERROR_ = 0;																				/*SHIP_TO_BPID AS NUMBER VALUES IS GOOD*/
+SET OUTPUT.BLK_TEST KEY = SHIPNAME/UNIQUE;
+IF SHIP_TO_BPID NE SHIP_TO_BPID1;
+RUN;
+
+/*DATA OUTPUT.FDK_FF;*/
+/*SET REF.ZIP_TO_TERR_Y2015C3;*/
+/*WHERE FF IN ("B1","H4");*/
+/*RUN;*/
+/**/
+/**/
+/*PROC SQL;*/
+/*CREATE TABLE OUTPUT.BULK_TERR_TEST AS*/
+/*SELECT A.*, B.TERR FROM OUTPUT.BLK_PURCH AS A LEFT JOIN OUTPUT.FDK_FF AS B*/
+/*ON A.SHIPZIP = B.ZIP;*/
+/*RUN;*/
+
+
+
+
+
+/*-----------------------------------------------------------------------------------------------------
+				  					CREATING THE BULK TERR ALIGNMENT
+------------------------------------------------------------------------------------------------------*/
+
+
+PROC SQL;
+CREATE TABLE OUTPUT.BULK_TERR AS
+SELECT A.*, B.TERR FROM OUTPUT.BLK_PURCH_BPID_NBR AS A, REF.ZIP_TO_TERR_Y2015C3 AS B
+WHERE A.SHIPZIP = B.ZIP;
+RUN;
+
+
+
+
+DATA OUTPUT.BULK_FDK_TERR (KEEP = TRANSTYPE TRX SHIPNAME -- SHIP_DEA SHIP_TO_BPID TERR);
+SET OUTPUT.BULK_TERR;
+_ERROR_ = 0;
+SET OUTPUT.FARYDAK_HIERARCHY KEY = TERR/UNIQUE;
+IF _IORC_ = 0;
+RUN;
+
+
+PROC SORT DATA = OUTPUT.BULK_FDK_TERR NODUPKEY OUT = OUTPUT.BULK_TERR_FNL;
+BY SHIP_TO_BPID TERR;																	/*MAKING THE BULK DATA UNIQUE BY BPID AND TERRITORY*/
+RUN;
+
+
+PROC SORT DATA = OUTPUT.BULK_TERR_FNL;
+BY TERR;
+RUN;
+
+
+/* GIVING CREDIT FOR UNIQUE SHIP_TO_BPID FOR EACH TERRITORY*/
+DATA OUTPUT.BLK_PURCH_TERR (INDEX = (TERR/UNIQUE));
+SET OUTPUT.BULK_TERR_FNL;
+BY TERR;
+IF FIRST.TERR THEN FINAL_BULK_PRES = 0;
+FINAL_BULK_PRES + 1;
+IF LAST.TERR THEN OUTPUT;
+RUN;
+
+
+
+
+/*MERGING THE DATA FROM MASTER PROFILE AND HIERARCHY DATA WITH THE XPONENT DATA AND THE SAMPLE DATA*/
+
+
+/*QC CHECK THE NUMBER OF TERRITORIES TO BE ACCOUNTED FOR */
+
+PROC SORT DATA = OUTPUT.FARYDAK_HIERARCHY NODUPKEY OUT = OUTPUT.TEST;
+BY TERR;
+RUN;
+
+
+PROC SORT DATA = OUTPUT.MASTER_HIERARCHY_MERGE_FDK NODUPKEY OUT = TEST;
+BY TERR NOVID;
+RUN;
+
+
+
+
+
+
+
+
+/*---------------------------------------------------------------------------------------------------------------------
+									FINAL OUTPUT PROCESSING
+---------------------------------------------------------------------------------------------------------------------*/
+
+
+/*INDEX THE MASTER_HIERARCHY , XPONENT DATA AND SAMPLES DATA WITH RESPECT TO EACH PHYSICIAN*/
+
+OPTIONS ERROR=1;  
+
+DATA OUTPUT.MASTER_HIERARCHY_RX_SAMPLES;
+	SET OUTPUT.MASTER_HIERARCHY_MERGE_FDK;
+
+	_ERROR_ = 0; SET OUTPUT.SAMPLES_FINAL (KEEP = NOVID SAMP_: NEW_SAMP_PRESCRIBER) KEY = NOVID / UNIQUE;
+	IF _IORC_ NE 0 THEN DO; SAMP_4 = .; SAMP_5 = .; SAMP_6 = .; SAMP_7 = .; NEW_SAMP_PRESCRIBER = .; END;
+
+ 	
+	_ERROR_ = 0 ; SET OUTPUT.RX_REQ_DATA (KEEP = NOVID MON_: NEW_RX_PRESCRIBER) KEY = NOVID / UNIQUE;
+	IF _IORC_ NE 0 THEN DO;  MON_1=.; MON_2=.; MON_3=.; MON_4=.; MON_5=.; NEW_RX_PRESCRIBER = .; 	END;
+
+	SAMPLE_RX_COUNT = SUM(NEW_SAMP_PRESCRIBER,NEW_RX_PRESCRIBER,0);
+
+	IF SAMPLE_RX_COUNT > 0 THEN FINAL_PRESC = 1; ELSE FINAL_PRESC = 0;
+
+RUN;
+
+
+DATA FINAL.TERR_NOVID_DATA;
+SET OUTPUT.MASTER_HIERARCHY_RX_SAMPLES;
+WHERE FINAL_PRESC = 1;
+RUN;
+
+
+PROC SUMMARY DATA=OUTPUT.MASTER_HIERARCHY_RX_SAMPLES NWAY MISSING;                                                       /*SUMMARIZE TOTAL NEW PRESCRIBERS FOR EACH PHYSICIAN*/
+  CLASS REGION ASM AREA TERR;
+  VAR FINAL_PRESC;
+  OUTPUT OUT=OUTPUT.TERR_UNIQ_PRESCRIBER_CNT(DROP=_:  INDEX = (TERR / UNIQUE) ) SUM=;
+RUN;
+
+
+
+
+/*-----------------------------------------------------------------------------------------------------
+	INCLUDING THE BULK PURCHASES ALONG WITH THE SAMPLES AND RX DATA FOR A TERRITORY
+-----------------------------------------------------------------------------------------------------*/
+
+DATA OUTPUT.MASTER_BULK_RX_SAMPLES;
+SET OUTPUT.TERR_UNIQ_PRESCRIBER_CNT;
+_ERROR_ = 0;																										
+SET OUTPUT.BLK_PURCH_TERR KEY = TERR/UNIQUE;
+IF _IORC_ NE 0 THEN FINAL_BULK_PRES = 0;
+RUN;
+
+DATA FINAL.BULK_RX_SAMPLES (KEEP = REGION ASM AREA TERR FINAL_PRESC_BULK);
+SET OUTPUT.MASTER_BULK_RX_SAMPLES;
+FINAL_PRESC_BULK =  FINAL_PRESC + FINAL_BULK_PRES;
+RUN;
+
+
+/* QC THE FINAL DATASET FOR UNIQUENESS*/
+
+PROC SORT DATA = FINAL.BULK_RX_SAMPLES OUT = TEST NODUPKEY;
+BY TERR;
+RUN;
+
+
+
+/*COMBINING THE ROSTER FILE TO GET THE SPECIALIST INFO*/
+
+PROC SORT DATA = ROST.ROSTER OUT = OUTPUT.ROSTER_NODUP NODUPKEY;BY TERR EMPID REP_FNAME REP_LNAME BASE_CITY;WHERE TERR NE "" AND LENGTH(COMPRESS(TERR)) IN (4,6);RUN;
+
+DATA OUTPUT.RST_NAME (KEEP = TERR NEW_EMPID NEW_NAME INDEX =(TERR/UNIQUE));
+	LENGTH NEW_EMPID NEW_NAME $100.;
+	RETAIN  NEW_EMPID NEW_NAME;
+	SET OUTPUT.ROSTER_NODUP;
+	BY TERR;
+	EMP_NAME = CATX(" ",REP_FNAME,REP_LNAME);
+	IF FIRST.TERR THEN DO; NEW_EMPID = ""; NEW_NAME = "";END;
+	NEW_EMPID = PROPCASE(CATX(" / ", NEW_EMPID,EMPID));
+	NEW_NAME = PROPCASE(CATX(" / ", NEW_NAME,EMP_NAME));
+	IF LAST.TERR;
+	IF NEW_EMPID EQ "" THEN NEW_NAME = "Vacant";
+RUN;
+
+
+
+
+
+/*--------------------------------------------------------------------------------------------------------------------
+									PRINTING SPECIALIST LAYOUT
+--------------------------------------------------------------------------------------------------------------------*/
+
+DATA FINAL.FARYDAK_CONTEST (KEEP = RG ASM TERR TR SPECIALIST FE_: FINAL_PRESC_BULK TOTAL_PAYOUT NEW_NAME NEW_EMPID);
+SET FINAL.BULK_RX_SAMPLES;
+_ERROR_ = 0;
+SET OUTPUT.RST_NAME KEY = TERR/UNIQUE;
+IF _IORC_ NE 0 THEN DO;  NEW_NAME = "XX"; NEW_EMPID = "XX"; END;
+
+SPECIALIST = NEW_NAME;
+
+	/*AWARDS*/
+	PAYOUT_LEVEL_1 = 0; PAYOUT_LEVEL_2 = 0; PAYOUT_LEVEL_3 = 0; PAYOUT_LEVEL_4 = 0;
+	IF FINAL_PRESC_BULK NE . THEN DO;
+		IF 0 < FINAL_PRESC_BULK <= 3 	THEN PAYOUT_LEVEL_1 = (100 * FINAL_PRESC_BULK);
+	ELSE IF 3 < FINAL_PRESC_BULK <= 6 	THEN PAYOUT_LEVEL_2 = 300 + (200 * (FINAL_PRESC_BULK-3));
+	ELSE IF 6 < FINAL_PRESC_BULK <= 9 	THEN PAYOUT_LEVEL_3 = 900 + (300 * (FINAL_PRESC_BULK-6));
+	ELSE IF FINAL_PRESC_BULK > 9 		THEN PAYOUT_LEVEL_4 = 1800 + (500 * (FINAL_PRESC_BULK-9));
+	END;
+
+	TOTAL_PAYOUT = SUM(OF PAYOUT_LEVEL_1 - PAYOUT_LEVEL_4,0);
+
+	/*PAYOUT CAP*/
+	IF TOTAL_PAYOUT >= 3000 THEN TOTAL_PAYOUT = 3000;
+	
+	/*FLAGS*/
+	IF 		FINAL_PRESC_BULK = 0 		THEN DO; FE_1 = 0; FE_2 = 0; FE_3 = 0; FE_4 = 0; END;
+	ELSE IF 0 < FINAL_PRESC_BULK < 3 	THEN DO; FE_1 = 1; FE_2 = 0; FE_3 = 0; FE_4 = 0; END;
+	ELSE IF FINAL_PRESC_BULK = 3 		THEN DO; FE_1 = 2; FE_2 = 0; FE_3 = 0; FE_4 = 0; END;
+	ELSE IF 3 < FINAL_PRESC_BULK < 6 	THEN DO; FE_1 = 2; FE_2 = 1; FE_3 = 0; FE_4 = 0; END;
+	ELSE IF FINAL_PRESC_BULK = 6 		THEN DO; FE_1 = 2; FE_2 = 2; FE_3 = 0; FE_4 = 0; END;
+	ELSE IF 6 < FINAL_PRESC_BULK < 9 	THEN DO; FE_1 = 2; FE_2 = 2; FE_3 = 1; FE_4 = 0; END;
+	ELSE IF FINAL_PRESC_BULK = 9 		THEN DO; FE_1 = 2; FE_2 = 2; FE_3 = 2; FE_4 = 0; END;
+	ELSE IF FINAL_PRESC_BULK > 9 		THEN DO; FE_1 = 2; FE_2 = 2; FE_3 = 2; FE_4 = 1; END;
+
+_ERROR_ = 0; SET OUTPUT.FARYDAK_HIERARCHY(KEEP = TERR TR ASM RG ) KEY = TERR / UNIQUE; IF _IORC_ NE 0 THEN DO; TR = "XX"; ASM = "XX"; RG = "XX"; END;
+
+RUN;
+
+
+
+PROC SORT DATA = FINAL.FARYDAK_CONTEST OUT = FINAL.SPL_LAYOUT_FINAL;
+BY DESCENDING FINAL_PRESC_BULK;
+RUN;
+
+
+
+
+
+
+/*------------------------------------------------------------------------------------------------------------
+							PRINTING ASM LAYOUT
+------------------------------------------------------------------------------------------------------------*/
+
+
+/*TEST THE UNIQUENESS OF THE LAYOUT */
+PROC SORT DATA = FINAL.SPL_LAYOUT_FINAL OUT = ASM_LAYOUT NODUPKEY ;
+BY TERR;
+RUN;
+
+/*ASM LAYOUT*/
+
+PROC SORT DATA = FINAL.SPL_LAYOUT_FINAL OUT = FINAL.ASM_LAYOUT ;
+BY RG ASM;
+RUN;
+
+
+
+DATA FINAL.ASM_LAYOUT_NEW (KEEP = RG ASM NEW_EMPID NEW_NAME ASM_PAYOUT TOTAL_CNT_PRESCRIBERS) ;
+SET FINAL.ASM_LAYOUT;
+BY RG ASM;
+IF FIRST.ASM THEN DO;TOTAL_PAYOUT_ASM = 0; CNT_TERR = 0; TOTAL_CNT_PRESCRIBERS = 0;END;
+TOTAL_PAYOUT_ASM + TOTAL_PAYOUT;
+CNT_TERR + 1;
+TOTAL_CNT_PRESCRIBERS + FINAL_PRESC_BULK;
+IF LAST.ASM;
+ASM_PAYOUT = (TOTAL_PAYOUT_ASM / CNT_TERR);
+TERR = SUBSTR(ASM,1,4);
+_ERROR_ = 0;
+SET OUTPUT.RST_NAME KEY = TERR/UNIQUE;
+IF _IORC_ NE 0 THEN DO;  NEW_NAME = "XX"; NEW_EMPID = "XX"; END;
+RUN;
+
+
+
+PROC SORT DATA = FINAL.ASM_LAYOUT_NEW OUT= FINAL.ASM_LAYOUT_FINAL;
+BY RG DESCENDING ASM_PAYOUT;
+RUN;
+
+
+
+
+
+/*------------------------------------------------------------------------------------------------------------
+										BACK TRACKING THE DATA 
+------------------------------------------------------------------------------------------------------------*/
+
+OPTIONS ERROR=1;  
+
+DATA OUTPUT.MASTER_PROFILE_BACK_TRACK;
+	SET INP_FROZ.MASTER_PROFILE_TERR_M02 (KEEP = TERR FNAME LNAME MNAME NOVID SPEC IC_FDK PDRP);
+
+	_ERROR_ = 0; SET OUTPUT.SAMPLES_FINAL (KEEP = NOVID SAMP_: NEW_SAMP_PRESCRIBER) KEY = NOVID / UNIQUE;
+	IF _IORC_ NE 0 THEN DO; SAMP_4 = .; SAMP_5 = .; SAMP_6 = .; SAMP_7 = .; NEW_SAMP_PRESCRIBER = .; END;
+
+ 	
+	_ERROR_ = 0 ; SET OUTPUT.RX_REQ_DATA (KEEP = NOVID MON_: NEW_RX_PRESCRIBER) KEY = NOVID / UNIQUE;
+	IF _IORC_ NE 0 THEN DO;  MON_1=.; MON_2=.; MON_3=.; MON_4=.; MON_5=.; NEW_RX_PRESCRIBER = .; 	END;
+
+	SAMPLE_RX_COUNT = SUM(NEW_SAMP_PRESCRIBER,NEW_RX_PRESCRIBER,0);
+
+	IF SAMPLE_RX_COUNT > 0 THEN FINAL_PRESC = 1; ELSE FINAL_PRESC = 0;
+
+RUN;
