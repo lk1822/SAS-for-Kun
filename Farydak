@@ -1,15 +1,16 @@
 %let start_date=01MAR2015;
 %let end_date=31JUL2015;
-
 /* New Prescribers from sample distribution */
 
 data OUTPUT.step1;
 	set OUTPUT.SAMPLES_NOVID_SORT;
+	MD_First_Name=upcase(MD_First_Name);
+	MD_Last_Name=upcase(MD_Last_Name);
 	where SHIP_DATE between "&start_date"d and "&end_date"d;
 run;
 
 proc sql;
-	create table step2 as 
+	create table Output.step2 as 
 	select novid, MD_First_Name, MD_Last_Name, count(SHIP_DATE) as num_shipment
 	from OUTPUT.step1
 	group by novid, MD_First_Name, MD_Last_Name;
