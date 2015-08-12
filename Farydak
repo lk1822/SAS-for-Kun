@@ -1,3 +1,6 @@
+%let start_date=01MAR2015;
+%let end_date=31JUL2015;
+
 /* New Prescribers from sample distribution */
 
 data OUTPUT.step1;
