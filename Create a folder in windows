@@ -1,6 +1,6 @@
 OPTIONS NOXSYNC NOXWAIT;
 
-%let folder = d:\test\subtest;                  *the location of the folder you want to create
+%let folder = d:\test\;                         *the location of the folder you want to create
 
 %let lib_path =  d:\test;                       *the folder you will use as the library
 
