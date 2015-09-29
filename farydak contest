@@ -1,5 +1,5 @@
 OPTION COMPRESS = YES;
-Option dlcreatedir;
+
 /*-----------------------------------------------------------------------------------------------------
 									ASSIGNMENT OF MACRO VARIABLES
 ------------------------------------------------------------------------------------------------------*/
@@ -15,6 +15,32 @@ Option dlcreatedir;
 %LET CYCLE = Y2015C3;																		/*CHANGES: FOR EVERY TRIMESTER*/
 
 
+/*-----------------------------------------------------------------------------------------------------
+									Creating Folders & Put Files in
+------------------------------------------------------------------------------------------------------*/
+
+Options NOXSYNC NOXWAIT;
+
+/*Create folders*/
+x cd G:\Liuku1\Farydak Contest\&YYYYMMDD.;
+x mkdir "OutData";
+x mkdir "Excel\Output\PDF_ASM";
+x mkdir "Excel\Output\PDF_SPEC";
+x mkdir "Excel\Templates";
+
+x mkdir "NOV sasdata\prescriber_product";
+x mkdir "NOV sasdata\roster";
+x mkdir "NOV sasdata\special";
+x mkdir "NOV sasdata\transactions";
+
+/*Put files in*/
+x copy "G:\Liuku1\Farydak Contest\Excel\Templates\*.*" "Excel\Templates";
+x copy "G:\Liuku1\Farydak Contest\Excel\Output\*.*" "Excel\Output";
+
+x move "Raw\mmy.sas7bdat" "NOV sasdata\prescriber_product\mmy.sas7bdat";
+x move "Raw\roster.sas7bdat" "NOV sasdata\roster\roster.sas7bdat";
+x move "Raw\fdk_21_day_trial.sas7bdat" "NOV sasdata\special\fdk_21_day_trial.sas7bdat";
+x move "Raw\fdk.sas7bdat" "NOV sasdata\transactions\fdk.sas7bdat";
 
 
 /*-----------------------------------------------------------------------------------------------------
@@ -22,38 +48,17 @@ Option dlcreatedir;
 ------------------------------------------------------------------------------------------------------*/
 
 
-LIBNAME RAW			"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\Raw"										ACCESS = READONLY;					
-LIBNAME REF 		"H:\Farydak contest\NOV sasdata\reference\&CYCLE." 									ACCESS = READONLY;						
+LIBNAME REF 		"G:\Liuku1\Farydak Contest\reference\&CYCLE." 										ACCESS = READONLY;						
 
-LIBNAME INP		 	"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\prescriber_product"; 									
-LIBNAME BLK 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\transactions";																			/*INPUT LIBRARIES*/
-LIBNAME ROST 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\roster"; 												
-/*LIBNAME DEA 		"G:\Guglisa1\NOV sasdata\reference"; */											
-LIBNAME BIO 		"H:\Farydak contest\NOV sasdata\&YYYYMMDD.\special";										
+LIBNAME INP		 	"G:\Liuku1\Farydak Contest\&YYYYMMDD.\NOV sasdata\prescriber_product"				ACCESS = READONLY; 
+LIBNAME BLK 		"G:\Liuku1\Farydak Contest\&YYYYMMDD.\NOV sasdata\transactions"						ACCESS = READONLY;																			/*INPUT LIBRARIES*/
+LIBNAME ROST 		"G:\Liuku1\Farydak Contest\&YYYYMMDD.\NOV sasdata\roster"							ACCESS = READONLY; 																						
+LIBNAME BIO 		"G:\Liuku1\Farydak Contest\&YYYYMMDD.\NOV sasdata\special"							ACCESS = READONLY;										
 
-
+OPTIONS DLCREATEDIR;
 						
-LIBNAME OUTPUT 		"H:\Farydak contest\OutData\&yyyymmdd.\Output";																					/*OUTPUT LIBRARIES*/
-LIBNAME FINAL 		"H:\Farydak contest\OutData\&YYYYMMDD.\Final";
-
-
-
-data INP.mmy;
-	set RAW.mmy;
-run;
-
-data BLK.fdk;
-	set RAW.fdk;
-run;
-
-data ROST.roster;
-	set RAW.roster;
-run;
-
-data BIO.fdk_21_day_trial;
-	set RAW.fdk_21_day_trial;
-run;
-
+LIBNAME OUTPUT 		"G:\Liuku1\Farydak Contest\&YYYYMMDD.\OutData\Output";																					/*OUTPUT LIBRARIES*/
+LIBNAME FINAL 		"G:\Liuku1\Farydak Contest\&YYYYMMDD.\OutData\Final";
 
 /*-----------------------------------------------------------------------------------------------------------------------------------------------
 								ADD A QC CHECK TO CONFIRM THERE IS NO HISTORY PRIOR TO MAR 2015
