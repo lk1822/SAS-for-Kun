@@ -1,6 +1,6 @@
 Options NOXSYNC NOXWAIT;
 
-%let file=d:\test1\test.sas7bat;       /*the file you want to move*/
-%let location=d:\test2;                /*the location the file will be*/
+%let file=d:\kmk\test1\test.txt;       /*the file you want to move*/
+%let newfile=d:\kmk\test2\test.txt;   /*the file you want to create*/
 
-%sysExec move "&file" "&location";
+x move &file &newfile;
